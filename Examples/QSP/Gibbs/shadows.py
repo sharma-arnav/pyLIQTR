@@ -31,7 +31,7 @@ S = np.array([[1,0],[0,1j]])
 id = np.eye(2)
 R = S @ had
 
-p_bases = [had, had @ S.conj(), id]
+p_bases = [had, had@S.conj().T, id]
 
 
 ################################################################################
@@ -162,10 +162,9 @@ def random_unitary(n, e):
 ###
 
 def random_pBasis(n):
-    u_list = []
-    for i in range(n):
-        u_list.append(p_bases[random.randint(0,2)])
-    return u_list
+    u_list = random.choices([0,1,2], k=n)
+    u = qops.multikron([p_bases[i] for i in u_list])
+    return u, u_list
 
 ################################################################################
 ###
@@ -194,7 +193,7 @@ def random_pBasis(n):
 def comp_measurement(rho):
     d = len(rho)
     probs = np.diag(rho)
-    choice = random.choices(list(range(d)), weights=probs)[0]
+    choice = random.choices(list(range(d)), weights=abs(probs))[0]
     b = bin(choice)[2:]
     b = '0'*(int(np.log2(d)-len(b))) + b
     return b
@@ -226,9 +225,8 @@ def comp_measurement(rho):
 ###
 
 def shadow_estimation(rho, n, O_list):
-    # Evolve state with random clifford
-    V_list = random.choices([0,1,2], k=n)
-    V = qops.multikron([p_bases[i] for i in V_list])
+    # Evolve state with random pauli basis measurement (and keep track of operator IDs)
+    V, V_list = random_pBasis(n)
     rhoV = V @ rho @ V.conj().T
     # Measure state in the computational basis
     b = comp_measurement(rhoV)
@@ -277,3 +275,87 @@ def med_of_mean(data, K):
     split_data = np.split(data, K, axis=0)
     means = [np.mean(subset, axis=0) for subset in split_data]    
     return np.median(means, axis=0)
+
+################################################################################
+###
+###   FUNCTION     Q(b)
+###
+################################################################################
+###
+###   DESCRIPTION
+###
+###    Passes a bitstring 'b' through the channel 'Q' described in Heidari et al 
+###
+###   ARGUMENTS
+###
+###     b           =  bitstring
+###
+###   RETURNS
+###
+###     w           =  weight       
+###     c           =  \ket{c}, where c is the new bitstring
+###
+###   REQUIRES
+###
+###      numpy as np
+###
+
+def Q(b):
+    w = 1
+    c = []
+    for bit in b:
+        c_j = np.array([0,0])
+        if random.randint(1,3) < 3:
+            c_j[int(bit)] = 1
+        else:
+            c_j[1-int(bit)] = 1
+            w *= -1
+        c.append(c_j)
+
+    return w, qops.multikron(c)
+
+################################################################################
+###
+###   FUNCTION     QSS_estimation(b, V, M)
+###
+################################################################################
+###
+###   DESCRIPTION
+###
+###      Estimates expectation value for a set of observables wrt a classical 
+###      shadow described by V, b.
+###
+###   ARGUMENTS
+###
+###     b             =  bitstring result of a randomized measurement of sample
+###     V             =  unitary used for randomized measurement
+###     M             =  list of measurement operators and 
+###                      pauli locations for observables
+###
+###   RETURNS
+###
+###      estimates    =  A list of (estimated) expectation values for each observable         
+###                      wrt classical shadow
+###
+###   REQUIRES
+###
+###      numpy as np, comp_measurement
+
+def QSS_estimation(b, V, M):
+    estimates = []
+    for m in M:
+        w, c = Q(b)
+        omega = V @ c
+        phi = np.outer(omega, omega.conj().T)
+
+        pLoc, mop = m.values()
+        b_li = comp_measurement(mop @ phi @ mop.conj().T)
+
+        if type(pLoc) is int:
+            k = 1
+            o_li = (-1)**(int(b_li[pLoc]))
+        else:
+            k = 2
+            o_li = (-1)**(int(b_li[pLoc[0]])+int(b_li[pLoc[1]]))
+        estimates.append((3**k)*w*o_li)
+    return estimates
